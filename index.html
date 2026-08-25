@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <link rel="manifest" href="manifest.json">
+  <title>チェキデコカメラ (4:5)</title>
+  <style>
+    * { box-sizing: border-box; touch-action: none; margin: 0; padding: 0; }
+    body { background: #111; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+    
+    /* 4:5 チェキ風コンテナ（下を広く取る） */
+    #container { 
+      position: relative; 
+      width: 320px; 
+      height: 400px; 
+      background: #f4f4f4; 
+      padding: 12px 12px 48px 12px; 
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5); 
+      border-radius: 4px; 
+      display: flex; 
+      flex-direction: column; 
+    }
+    
+    /* プレビュー用カメラ映像 / Canvas (4:5の内部写真枠) */
+    .viewport { width: 296px; height: 340px; object-fit: cover; background: #000; }
+    canvas { display: none; }
+    
+    .toolbar { display: flex; gap: 8px; margin-top: 15px; flex-wrap: wrap; justify-content: center; }
+    button, input[type="color"] { padding: 8px 12px; font-weight: bold; border-radius: 20px; border: none; background: #ff69b4; color: #fff; font-size: 13px; cursor: pointer; }
+    button:active { opacity: 0.8; }
+    .btn-secondary { background: #6c757d; }
+    .btn-success { background: #28a745; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <div id="container">
+    <video id="webcam" class="viewport" autoplay playsinline></video>
+    <canvas id="stage" class="viewport" width="1080" height="1350"></canvas>
+  </div>
+
+  <!-- カメラ撮影ツールバー -->
+  <div class="toolbar" id="cam-tools">
+    <button id="btn-snap">📷 撮影する</button>
+  </div>
+
+  <!-- 撮影後の選択肢ツールバー -->
+  <div class="toolbar hidden" id="choice-tools">
+    <button id="btn-retake" class="btn-secondary">撮り直し</button>
+    <button id="btn-save-and-draw" class="btn-success">保存して描画へ</button>
+    <button id="btn-skip-save-draw">保存しないで描画へ</button>
+  </div>
+
+  <!-- デコレーション（手描き・スタンプ）ツールバー -->
+  <div class="toolbar hidden" id="edit-tools">
+    <input type="color" id="pen-color" value="#ff007f">
+    <button id="btn-stamp-heart">❤️</button>
+    <button id="btn-stamp-star">⭐</button>
+    <button id="btn-clear">リセット</button>
+    <button id="btn-final-save" class="btn-success">💾 最終保存</button>
+    <button id="btn-back-choice" class="btn-secondary">戻る</button>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
