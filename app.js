@@ -30,7 +30,6 @@ let currentColor = '#ff0000';
 let currentLineWidth = 16;
 let currentUniqueCode = '';
 
-// メンバー情報のロード（デフォルトで1つ用意）
 let members = JSON.parse(localStorage.getItem('cheki_members') || JSON.stringify([
   { name: '担当 〇〇', color: '#ff007f' }
 ]));
@@ -39,13 +38,13 @@ if (currentMemberIndex >= members.length) currentMemberIndex = 0;
 
 inputGroup.value = localStorage.getItem('cheki_group') || '';
 
-// カラーパレットの定義（設定画面・描画画面共通）
+// 緑色を明るく濃い鮮やかな緑にアップデート
 const paletteData = [
   { color: '#ff0000', label: '赤' },
   { color: '#0000ff', label: '青' },
   { color: '#FFFF00', label: '黄' },
   { color: '#ff00ff', label: '紫' },
-  { color: '#008000', label: '緑' },
+  { color: '#00cc44', label: '緑' }, // より明るく濃い緑
   { color: '#ff69b4', label: 'ピンク' },
   { color: '#00a86b', label: 'エメラルド' },
   { color: '#87ceeb', label: 'パステル' },
@@ -54,71 +53,59 @@ const paletteData = [
   { color: '#000000', label: '黒' }
 ];
 
-// 共通パレットをHTMLに生成する関数
+// 共通カラーパレット描画関数
 function renderPalettes() {
-  const containers = [
-    document.getElementById('color-palette'),
-    document.getElementById('settings-color-palette')
-  ];
+  const container = document.getElementById('color-palette');
+  if (!container) return;
+  container.innerHTML = '';
 
-  containers.forEach(container => {
-    if (!container) return;
-    container.innerHTML = '';
-
-    paletteData.forEach(item => {
-      const div = document.createElement('div');
-      div.className = `color-item ${currentColor === item.color ? 'selected' : ''}`;
-      div.setAttribute('data-color', item.color);
-      
-      const borderStyle = (item.color === '#ffffff' || item.color === '#000000') ? 'border: 2px solid #888;' : 'border: 2px solid #fff;';
-      div.innerHTML = `
-        <div class="color-chip" style="background: ${item.color}; ${borderStyle}"></div>
-        <span class="color-label">${item.label}</span>
-      `;
-      div.addEventListener('click', () => {
-        currentColor = item.color;
-        currentMode = 'pen';
-        const eraserBtn = document.getElementById('btn-eraser');
-        if (eraserBtn) eraserBtn.classList.remove('btn-active');
-        renderPalettes();
-      });
-      container.appendChild(div);
-    });
-
-    // カスタムカラーパレット項目
-    const customDiv = document.createElement('div');
-    customDiv.className = 'color-item';
-    customDiv.style.position = 'relative';
-    customDiv.innerHTML = `
-      <input type="color" id="pen-custom-color-${container.id}" value="${currentColor}" title="カスタム" style="width:26px; height:26px; padding:0; border:none; border-radius:50%; cursor:pointer; opacity:0; position:absolute; top:0; left:0;">
-      <div class="color-chip" style="background: conic-gradient(red, yellow, green, cyan, blue, magenta, red); border: 2px solid #fff;"></div>
-      <span class="color-label">カスタム</span>
+  paletteData.forEach(item => {
+    const div = document.createElement('div');
+    div.className = `color-item ${currentColor === item.color ? 'selected' : ''}`;
+    
+    // 白・黒の境界線切れを見やすく調整
+    const borderStyle = (item.color === '#ffffff' || item.color === '#000000') ? 'border: 2px solid #888;' : 'border: 2px solid #fff;';
+    div.innerHTML = `
+      <div class="color-chip" style="background: ${item.color}; ${borderStyle}"></div>
+      <span class="color-label">${item.label}</span>
     `;
-    const inputEl = customDiv.querySelector('input');
-    inputEl.addEventListener('input', (e) => {
-      currentColor = e.target.value;
+    div.addEventListener('click', () => {
+      currentColor = item.color;
       currentMode = 'pen';
       renderPalettes();
     });
-    container.appendChild(customDiv);
-
-    // 消しゴムボタン（描画ツールバー側のみ）
-    if (container.id === 'color-palette') {
-      const eraserBtn = document.createElement('button');
-      eraserBtn.id = 'btn-eraser';
-      eraserBtn.className = `btn-secondary ${currentMode === 'eraser' ? 'btn-active' : ''}`;
-      eraserBtn.style.cssText = 'padding: 4px 8px; font-size: 11px; margin-left: 4px;';
-      eraserBtn.textContent = '🧹 消しゴム';
-      eraserBtn.addEventListener('click', () => {
-        currentMode = 'eraser';
-        renderPalettes();
-      });
-      container.appendChild(eraserBtn);
-    }
+    container.appendChild(div);
   });
+
+  // カスタムカラー
+  const customDiv = document.createElement('div');
+  customDiv.className = 'color-item';
+  customDiv.style.position = 'relative';
+  customDiv.innerHTML = `
+    <input type="color" id="pen-custom-color" value="${currentColor}" style="width:22px; height:22px; padding:0; border:none; border-radius:50%; cursor:pointer; opacity:0; position:absolute; top:0; left:0;">
+    <div class="color-chip" style="background: conic-gradient(red, yellow, green, cyan, blue, magenta, red); border: 2px solid #fff;"></div>
+    <span class="color-label">自由</span>
+  `;
+  customDiv.querySelector('input').addEventListener('input', (e) => {
+    currentColor = e.target.value;
+    currentMode = 'pen';
+    renderPalettes();
+  });
+  container.appendChild(customDiv);
+
+  // 消しゴム
+  const eraserBtn = document.createElement('button');
+  eraserBtn.className = `btn-secondary ${currentMode === 'eraser' ? 'btn-active' : ''}`;
+  eraserBtn.style.cssText = 'padding: 4px 6px; font-size: 9px; border-radius: 12px;';
+  eraserBtn.textContent = '🧹消';
+  eraserBtn.addEventListener('click', () => {
+    currentMode = 'eraser';
+    renderPalettes();
+  });
+  container.appendChild(eraserBtn);
 }
 
-// 設定画面のメンバー入力行を構築
+// 設定画面のメンバー入力行構築
 function renderMemberInputs() {
   memberListContainer.innerHTML = '';
   members.forEach((m, idx) => {
@@ -127,7 +114,7 @@ function renderMemberInputs() {
     row.innerHTML = `
       <div style="display: flex; gap: 6px; align-items: center;">
         <input type="text" class="m-name" value="${m.name}" placeholder="メンバー名" style="flex-grow:1;">
-        <input type="color" class="m-color" value="${m.color}" style="width: 36px; height: 34px; padding:0; border:none; border-radius:4px; cursor:pointer;">
+        <input type="color" class="m-color" value="${m.color}" style="width: 34px; height: 32px; padding:0; border:none; border-radius:4px; cursor:pointer;">
         <button class="btn-secondary btn-del-member" style="padding: 4px 8px; background: #d9534f;">✕</button>
       </div>
     `;
@@ -168,7 +155,6 @@ document.getElementById('btn-open-settings').addEventListener('click', () => {
 });
 
 document.getElementById('btn-close-settings').addEventListener('click', () => {
-  // 入力欄からデータを反映
   const rows = memberListContainer.querySelectorAll('.member-entry-box');
   members = [];
   rows.forEach(row => {
@@ -182,7 +168,6 @@ document.getElementById('btn-close-settings').addEventListener('click', () => {
   settingsModal.classList.add('hidden');
 });
 
-// アイドル名クリックでメンバー切替ポップアップを表示
 lblMember.addEventListener('click', () => {
   popupMemberList.innerHTML = '';
   members.forEach((m, idx) => {
@@ -206,7 +191,6 @@ document.getElementById('btn-close-popup').addEventListener('click', () => {
   popupModal.classList.add('hidden');
 });
 
-// 4桁の重複なし番号生成
 function generateUniqueCode() {
   const todayStr = new Date().toISOString().slice(0, 10);
   let storedData = JSON.parse(localStorage.getItem('cheki_codes') || '{}');
@@ -231,7 +215,6 @@ function getFormattedDate() {
   return `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
 }
 
-// カメラ初期化
 async function initCamera() {
   if (currentStream) {
     currentStream.getTracks().forEach(track => track.stop());
@@ -304,7 +287,6 @@ zoomRange.addEventListener('input', (e) => {
   }
 });
 
-// 撮影処理
 document.getElementById('btn-snap').addEventListener('click', () => {
   if (!video.videoWidth) {
     alert('カメラの映像がまだ準備できていません。');
@@ -331,7 +313,6 @@ document.getElementById('btn-snap').addEventListener('click', () => {
 
   const currentMember = members[currentMemberIndex] || members[0];
 
-  // 上部テキスト
   ctx.fillStyle = '#555555';
   ctx.font = 'bold 34px sans-serif';
   ctx.textAlign = 'left';
@@ -341,7 +322,6 @@ document.getElementById('btn-snap').addEventListener('click', () => {
   ctx.textAlign = 'right';
   ctx.fillText(currentMember.name, 1020, 65);
 
-  // 下部テキスト
   ctx.fillStyle = '#444444';
   ctx.font = 'bold 36px sans-serif';
   ctx.textAlign = 'left';
@@ -379,7 +359,6 @@ function goToEditMode() {
   editTools.classList.remove('hidden');
 }
 
-// 太さボタン
 const sizeThin = document.getElementById('size-thin');
 const sizeMid = document.getElementById('size-mid');
 const sizeThick = document.getElementById('size-thick');
@@ -398,7 +377,6 @@ sizeThin.addEventListener('click', () => updateSizeButtons(sizeThin, 8));
 sizeMid.addEventListener('click', () => updateSizeButtons(sizeMid, 16));
 sizeThick.addEventListener('click', () => updateSizeButtons(sizeThick, 32));
 
-// 描画ロジック
 function getCanvasCoords(e) {
   const rect = canvas.getBoundingClientRect();
   const touch = e.touches ? e.touches[0] : e;
@@ -424,6 +402,10 @@ function startDraw(e) {
     drawEmoji('❤️', x, y);
   } else if (currentMode === 'star') {
     drawEmoji('⭐', x, y);
+  } else if (currentMode === 'sparkle') {
+    drawEmoji('✨', x, y);
+  } else if (currentMode === 'paw') {
+    drawEmoji('🐾', x, y);
   }
 }
 
@@ -454,6 +436,8 @@ canvas.addEventListener('touchend', endDraw);
 
 document.getElementById('btn-stamp-heart').addEventListener('click', () => currentMode = 'heart');
 document.getElementById('btn-stamp-star').addEventListener('click', () => currentMode = 'star');
+document.getElementById('btn-stamp-sparkle').addEventListener('click', () => currentMode = 'sparkle');
+document.getElementById('btn-stamp-paw').addEventListener('click', () => currentMode = 'paw');
 
 document.getElementById('btn-back-choice').addEventListener('click', () => {
   editTools.classList.add('hidden');
