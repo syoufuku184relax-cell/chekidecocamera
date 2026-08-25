@@ -38,7 +38,6 @@
       z-index: 5;
     }
     
-    /* 撮影画面のアイドル名をクリック可能にする */
     #lbl-member {
       pointer-events: auto;
       cursor: pointer;
@@ -64,13 +63,13 @@
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
       background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 100;
     }
-    .modal-content { background: #222; padding: 20px; border-radius: 10px; width: 92vw; max-width: 380px; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
+    .modal-content { background: #222; padding: 16px; border-radius: 10px; width: 94vw; max-width: 400px; max-height: 90vh; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
     .config-row { display: flex; flex-direction: column; gap: 4px; }
     .config-row input { background: #333; color: #fff; border: 1px solid #555; padding: 8px; border-radius: 4px; font-size: 14px; }
     
-    .member-entry-box { background: #2a2a2a; padding: 8px; border-radius: 6px; display: flex; flex-direction: column; gap: 6px; border: 1px solid #444; }
+    .member-entry-box { background: #2a2a2a; padding: 6px; border-radius: 6px; display: flex; flex-direction: column; gap: 4px; border: 1px solid #444; }
 
-    /* メンバー切替用ポップアップ */
+    /* メンバー切替ポップアップ */
     #popup-modal {
       position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
       background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100;
@@ -79,12 +78,20 @@
     .popup-item { padding: 10px; background: #333; border-radius: 6px; cursor: pointer; font-weight: bold; border: 1px solid #555; }
     .popup-item:active { background: #444; }
 
-    /* カラーパレット (端の切れかけを防ぐパディング調整済み) */
-    .palette-container { display: flex; gap: 8px; overflow-x: auto; max-width: 92vw; padding: 6px 12px; align-items: center; }
+    /* カラーパレット: 1画面内に全色収め、見切れを完全に解消 */
+    .palette-container { 
+      display: flex; 
+      gap: 3px; 
+      width: 100%; 
+      justify-content: space-between; 
+      align-items: center; 
+      padding: 4px 2px;
+      overflow-x: hidden;
+    }
     .color-item { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; flex-shrink: 0; }
-    .color-chip { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+    .color-chip { width: 22px; height: 22px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.3); }
     .color-item.selected .color-chip { transform: scale(1.15); border-color: #ff007f; }
-    .color-label { font-size: 9px; color: #bbb; }
+    .color-label { font-size: 8px; color: #ccc; }
 
     .slider-container { display: flex; align-items: center; gap: 6px; font-size: 11px; width: 92vw; max-width: 414px; margin-top: 4px; }
     .slider-container input[type="range"] { flex-grow: 1; }
@@ -106,19 +113,10 @@
           <span>メンバー一覧:</span>
           <button id="btn-add-member-row" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;">＋ 追加</button>
         </div>
-        <div id="member-list-container" style="display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; margin-top: 4px;">
-          <!-- 動的にメンバー入力欄が追加されます -->
-        </div>
+        <div id="member-list-container" style="display: flex; flex-direction: column; gap: 6px; max-height: 150px; overflow-y: auto; margin-top: 2px;"></div>
       </div>
 
-      <div class="config-row">
-        <span>設定画面のカラーパレット確認（描画用と共通）:</span>
-        <div class="palette-container" id="settings-color-palette" style="background: #1a1a1a; border-radius: 6px;">
-          <!-- 共通パレットがここに展開されます -->
-        </div>
-      </div>
-
-      <button id="btn-close-settings" class="btn-success" style="margin-top: 8px;">設定を保存して閉じる</button>
+      <button id="btn-close-settings" class="btn-success" style="margin-top: 4px;">設定を保存して閉じる</button>
     </div>
   </div>
 
@@ -126,9 +124,7 @@
   <div id="popup-modal" class="hidden">
     <div class="popup-content">
       <h4 style="color: #ff69b4;">メンバー選択</h4>
-      <div id="popup-member-list" style="display: flex; flex-direction: column; gap: 8px;">
-        <!-- 選択肢が動的に入ります -->
-      </div>
+      <div id="popup-member-list" style="display: flex; flex-direction: column; gap: 8px;"></div>
       <button id="btn-close-popup" class="btn-secondary" style="margin-top: 6px;">キャンセル</button>
     </div>
   </div>
@@ -165,20 +161,20 @@
 
   <!-- デコレーションツールバー -->
   <div class="toolbar hidden" id="edit-tools">
-    <!-- カラーパレット（白黒の見切れ対策パディング付き） -->
-    <div class="palette-container" id="color-palette">
-      <!-- 共通パレットがここに展開されます -->
-    </div>
+    <!-- カラーパレット -->
+    <div class="palette-container" id="color-palette"></div>
     
     <!-- 太さ選択 & スタンプ & アクション -->
-    <div style="display: flex; gap: 4px; width: 100%; justify-content: center; align-items: center; margin-top: 4px; flex-wrap: wrap;">
-      <button id="size-thin" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;">細</button>
-      <button id="size-mid" class="btn-active" style="padding: 4px 8px; font-size: 11px;">中</button>
-      <button id="size-thick" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;">太</button>
-      <button id="btn-stamp-heart">❤️</button>
-      <button id="btn-stamp-star">⭐</button>
-      <button id="btn-back-choice" class="btn-secondary">戻る</button>
-      <button id="btn-final-save" class="btn-success">💾 保存</button>
+    <div style="display: flex; gap: 3px; width: 100%; justify-content: center; align-items: center; margin-top: 4px; flex-wrap: wrap;">
+      <button id="size-thin" class="btn-secondary" style="padding: 4px 6px; font-size: 10px;">細</button>
+      <button id="size-mid" class="btn-active" style="padding: 4px 6px; font-size: 10px;">中</button>
+      <button id="size-thick" class="btn-secondary" style="padding: 4px 6px; font-size: 10px;">太</button>
+      <button id="btn-stamp-heart" style="padding: 4px 8px; font-size: 12px;">❤️</button>
+      <button id="btn-stamp-star" style="padding: 4px 8px; font-size: 12px;">⭐</button>
+      <button id="btn-stamp-sparkle" style="padding: 4px 8px; font-size: 12px;">✨</button>
+      <button id="btn-stamp-paw" style="padding: 4px 8px; font-size: 12px;">🐾</button>
+      <button id="btn-back-choice" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;">戻る</button>
+      <button id="btn-final-save" class="btn-success" style="padding: 4px 8px; font-size: 11px;">💾 保存</button>
     </div>
   </div>
 
