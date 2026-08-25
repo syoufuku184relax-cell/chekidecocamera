@@ -1,4 +1,3 @@
-// PWA Service Worker 登録
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js');
 }
@@ -10,30 +9,54 @@ const ctx = canvas.getContext('2d');
 const camTools = document.getElementById('cam-tools');
 const choiceTools = document.getElementById('choice-tools');
 const editTools = document.getElementById('edit-tools');
-const penColorInput = document.getElementById('pen-color');
+const configBox = document.getElementById('config-box');
+const zoomSliderBox = document.getElementById('zoom-slider-box');
+const zoomRange = document.getElementById('zoom-range');
 
+const inputGroup = document.getElementById('input-group');
+const inputMember = document.getElementById('input-member');
+const inputMemberColor = document.getElementById('input-member-color');
+const lblGroup = document.getElementById('lbl-group');
+const lblMember = document.getElementById('lbl-member');
+
+let currentStream = null;
+let currentFacingMode = 'environment';
+let torchState = false;
 let isDrawing = false;
-let currentMode = 'pen';
+let currentMode = 'pen'; // 'pen' | 'eraser' | 'heart' | 'star'
+let currentColor = '#ff0000';
+let currentLineWidth = 16; // デフォルト「中」
 let currentUniqueCode = '';
 
-// 1日の中で重複しない4桁のランダムな英数字を生成（ローカルストレージで当日分を管理）
-function generateUniqueCode() {
-  const todayStr = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  let storedData = JSON.parse(localStorage.getItem('cheki_codes') || '{}');
-  
-  if (storedData.date !== todayStr) {
-    storedData = { date: todayStr, codes: [] };
-  }
+// ローカルストレージ設定復元
+inputGroup.value = localStorage.getItem('cheki_group') || '';
+inputMember.value = localStorage.getItem('cheki_member') || '';
+inputMemberColor.value = localStorage.getItem('cheki_mcolor') || '#ff007f';
 
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // 紛らわしい文字(0, O, I, 1等)を除外
-  let code = '';
+function updateHeaderLabels() {
+  lblGroup.textContent = inputGroup.value;
+  lblMember.textContent = inputMember.value;
+  lblMember.style.color = inputMemberColor.value;
   
-  // 重複しない4桁を生成
+  localStorage.setItem('cheki_group', inputGroup.value);
+  localStorage.setItem('cheki_member', inputMember.value);
+  localStorage.setItem('cheki_mcolor', inputMemberColor.value);
+}
+inputGroup.addEventListener('input', updateHeaderLabels);
+inputMember.addEventListener('input', updateHeaderLabels);
+inputMemberColor.addEventListener('input', updateHeaderLabels);
+updateHeaderLabels();
+
+function generateUniqueCode() {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  let storedData = JSON.parse(localStorage.getItem('cheki_codes') || '{}');
+  if (storedData.date !== todayStr) storedData = { date: todayStr, codes: [] };
+
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
   while (true) {
     code = '';
-    for (let i = 0; i < 4; i++) {
-      code += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
+    for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
     if (!storedData.codes.includes(code)) {
       storedData.codes.push(code);
       localStorage.setItem('cheki_codes', JSON.stringify(storedData));
@@ -43,44 +66,82 @@ function generateUniqueCode() {
   return code;
 }
 
-// 現在の日付を取得 (例: 2026.06.07)
 function getFormattedDate() {
   const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const d = String(now.getDate()).padStart(2, '0');
-  return `${y}.${m}.${d}`;
+  return `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
 }
 
-// 1. カメラ起動 (背面カメラ優先・4:5に近い解像度を狙う)
 async function initCamera() {
+  if (currentStream) {
+    currentStream.getTracks().forEach(track => track.stop());
+  }
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: 1080, height: 1350 },
+    const constraints = {
+      video: { facingMode: { exact: currentFacingMode }, width: { ideal: 1080 }, height: { ideal: 1350 } },
       audio: false
-    });
-    video.srcObject = stream;
+    };
+    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = currentStream;
+    zoomRange.value = 1;
+    zoomSliderBox.classList.remove('hidden');
   } catch (err) {
-    alert('カメラの起動に失敗しました: ' + err.message);
+    try {
+      const fallbackConstraints = {
+        video: { facingMode: currentFacingMode, width: { ideal: 1080 }, height: { ideal: 1350 } },
+        audio: false
+      };
+      currentStream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+      video.srcObject = currentStream;
+      zoomSliderBox.classList.remove('hidden');
+    } catch (e) {
+      alert('カメラの起動に失敗しました: ' + e.message);
+      zoomSliderBox.classList.add('hidden');
+    }
   }
 }
 initCamera();
 
-// 2. 撮影ボタン
+document.getElementById('btn-flip').addEventListener('click', () => {
+  currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment';
+  initCamera();
+});
+
+document.getElementById('btn-torch').addEventListener('click', async () => {
+  const track = currentStream?.getVideoTracks()[0];
+  if (!track) return;
+  try {
+    torchState = !torchState;
+    await track.applyConstraints({ advanced: [{ torch: torchState }] });
+    document.getElementById('btn-torch').style.background = torchState ? '#28a745' : '#ffc107';
+  } catch (err) {
+    alert('お使いの端末・カメラではライト制御がサポートされていません。');
+    torchState = !torchState;
+  }
+});
+
+zoomRange.addEventListener('input', (e) => {
+  const track = currentStream?.getVideoTracks()[0];
+  if (!track) return;
+  const capabilities = track.getCapabilities();
+  if (capabilities.zoom) {
+    track.applyConstraints({ advanced: [{ zoom: parseFloat(e.target.value) }] });
+  } else {
+    video.style.transform = `scale(${e.target.value})`;
+  }
+});
+
+// 撮影処理
 document.getElementById('btn-snap').addEventListener('click', () => {
   currentUniqueCode = generateUniqueCode();
   
-  // 1080x1350 のCanvas全体を「チェキ風白背景（#f4f4f4）」で塗りつぶす
-  ctx.fillStyle = '#f4f4f4';
+  ctx.fillStyle = '#fdfdfd';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // 写真エリア（上部: 1080x1180px）にカメラ映像を中央クロップ＆描画
-  const vWidth = video.videoWidth;
-  const vHeight = video.videoHeight;
+  const vWidth = video.videoWidth || 1080;
+  const vHeight = video.videoHeight || 1350;
   const targetW = 1080;
-  const targetH = 1180;
+  const targetH = 1130;
   
-  // cover形式で切り抜き計算
   const scale = Math.max(targetW / vWidth, targetH / vHeight);
   const sw = targetW / scale;
   const sh = targetH / scale;
@@ -89,40 +150,47 @@ document.getElementById('btn-snap').addEventListener('click', () => {
 
   ctx.drawImage(video, sx, sy, sw, sh, 0, 0, targetW, targetH);
 
-  // 下部の白枠エリアに「日付（左下）」と「認識番号（右下）」をテキスト描画
-  ctx.fillStyle = '#444444';
-  ctx.font = 'bold 42px sans-serif';
-  
-  // 左下（日付）
+  // 上部テキスト
+  ctx.fillStyle = '#555555';
+  ctx.font = 'bold 34px sans-serif';
   ctx.textAlign = 'left';
-  ctx.fillText(getFormattedDate(), 60, 1285);
-
-  // 右下（認識番号）
+  ctx.fillText(inputGroup.value, 60, 75);
+  
+  ctx.fillStyle = inputMemberColor.value;
   ctx.textAlign = 'right';
-  ctx.fillText(`#${currentUniqueCode}`, 1020, 1285);
+  ctx.fillText(inputMember.value, 1020, 75);
 
-  // 画面表示切替（撮影プレビュー非表示 ＆ Canvas表示 ＆ 選択肢ボタン表示）
+  // 下部テキスト
+  ctx.fillStyle = '#444444';
+  ctx.font = 'bold 40px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(getFormattedDate(), 60, 1290);
+
+  ctx.textAlign = 'right';
+  ctx.fillText(`#${currentUniqueCode}`, 1020, 1290);
+
   video.classList.add('hidden');
+  zoomSliderBox.classList.add('hidden');
+  configBox.classList.add('hidden');
   canvas.style.display = 'block';
   camTools.classList.add('hidden');
   choiceTools.classList.remove('hidden');
 });
 
-// 3. 選択肢: 撮り直し
 document.getElementById('btn-retake').addEventListener('click', () => {
   video.classList.remove('hidden');
+  zoomSliderBox.classList.remove('hidden');
+  configBox.classList.remove('hidden');
   canvas.style.display = 'none';
   choiceTools.classList.add('hidden');
   camTools.classList.remove('hidden');
 });
 
-// 4. 選択肢: 保存して描画へ（端末に自動保存してからデコ画面へ）
 document.getElementById('btn-save-and-draw').addEventListener('click', () => {
   autoSaveImage('raw');
   goToEditMode();
 });
 
-// 5. 選択肢: 保存しないで描画へ
 document.getElementById('btn-skip-save-draw').addEventListener('click', () => {
   goToEditMode();
 });
@@ -132,29 +200,77 @@ function goToEditMode() {
   editTools.classList.remove('hidden');
 }
 
-// 6. デコレーション（手描き・スタンプ）ロジック
+// カラーパレット & 消しゴム & 太さの制御
+const colorChips = document.querySelectorAll('.color-chip');
+colorChips.forEach(chip => {
+  chip.addEventListener('click', (e) => {
+    colorChips.forEach(c => c.classList.remove('selected'));
+    e.target.classList.add('selected');
+    currentColor = e.target.getAttribute('data-color');
+    currentMode = 'pen';
+    document.getElementById('btn-eraser').classList.remove('btn-active');
+  });
+});
+
+document.getElementById('pen-custom-color').addEventListener('input', (e) => {
+  colorChips.forEach(c => c.classList.remove('selected'));
+  currentColor = e.target.value;
+  currentMode = 'pen';
+  document.getElementById('btn-eraser').classList.remove('btn-active');
+});
+
+// 消しゴムボタン
+document.getElementById('btn-eraser').addEventListener('click', () => {
+  currentMode = 'eraser';
+  colorChips.forEach(c => c.classList.remove('selected'));
+  document.getElementById('btn-eraser').classList.add('btn-active');
+});
+
+// 太さボタン（細・中・太）
+const sizeThin = document.getElementById('size-thin');
+const sizeMid = document.getElementById('size-mid');
+const sizeThick = document.getElementById('size-thick');
+
+function updateSizeButtons(selectedBtn, width) {
+  [sizeThin, sizeMid, sizeThick].forEach(btn => btn.classList.remove('btn-active', 'btn-success'));
+  [sizeThin, sizeMid, sizeThick].forEach(btn => btn.classList.add('btn-secondary'));
+  selectedBtn.classList.remove('btn-secondary');
+  selectedBtn.classList.add('btn-active');
+  currentLineWidth = width;
+}
+
+sizeThin.addEventListener('click', () => updateSizeButtons(sizeThin, 8));
+sizeMid.addEventListener('click', () => updateSizeButtons(sizeMid, 16));
+sizeThick.addEventListener('click', () => updateSizeButtons(sizeThick, 32));
+
+// デコレーション（手描き・消しゴム・スタンプ）
 function getCanvasCoords(e) {
   const rect = canvas.getBoundingClientRect();
   const touch = e.touches ? e.touches[0] : e;
-  const scaleX = canvas.width / rect.width;
-  const scaleY = canvas.height / rect.height;
   return {
-    x: (touch.clientX - rect.left) * scaleX,
-    y: (touch.clientY - rect.top) * scaleY
+    x: (touch.clientX - rect.left) * (canvas.width / rect.width),
+    y: (touch.clientY - rect.top) * (canvas.height / rect.height)
   };
 }
 
 function startDraw(e) {
-  if (editTools.classList.contains('hidden')) return; // 編集モード中以外は無効
+  if (editTools.classList.contains('hidden')) return;
   const { x, y } = getCanvasCoords(e);
   
-  if (currentMode === 'pen') {
+  if (currentMode === 'pen' || currentMode === 'eraser') {
     isDrawing = true;
     ctx.beginPath();
     ctx.moveTo(x, y);
-    ctx.strokeStyle = penColorInput.value;
-    ctx.lineWidth = 16;
     ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = currentLineWidth;
+    
+    if (currentMode === 'eraser') {
+      // 消しゴム時は合成モードを元に戻し、白枠や写真の色に戻す（簡易的に白で描画）
+      ctx.strokeStyle = '#fdfdfd'; 
+    } else {
+      ctx.strokeStyle = currentColor;
+    }
   } else if (currentMode === 'heart') {
     drawEmoji('❤️', x, y);
   } else if (currentMode === 'star') {
@@ -163,7 +279,7 @@ function startDraw(e) {
 }
 
 function moveDraw(e) {
-  if (!isDrawing || currentMode !== 'pen') return;
+  if (!isDrawing || (currentMode !== 'pen' && currentMode !== 'eraser')) return;
   const { x, y } = getCanvasCoords(e);
   ctx.lineTo(x, y);
   ctx.stroke();
@@ -180,7 +296,6 @@ function drawEmoji(emoji, x, y) {
   ctx.fillText(emoji, x, y);
 }
 
-// イベント登録
 canvas.addEventListener('mousedown', startDraw);
 canvas.addEventListener('mousemove', moveDraw);
 canvas.addEventListener('mouseup', endDraw);
@@ -188,25 +303,14 @@ canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startDraw(e);
 canvas.addEventListener('touchmove', (e) => { e.preventDefault(); moveDraw(e); });
 canvas.addEventListener('touchend', endDraw);
 
-// ツールボタン切替
-document.getElementById('pen-color').addEventListener('change', () => currentMode = 'pen');
 document.getElementById('btn-stamp-heart').addEventListener('click', () => currentMode = 'heart');
 document.getElementById('btn-stamp-star').addEventListener('click', () => currentMode = 'star');
 
-// リセット（撮影直後の状態に戻す）
-document.getElementById('btn-clear').addEventListener('click', () => {
-  // 再度スナップショット部分だけを再描画するのは複雑なため、
-  // シンプルにするなら「撮り直し」へ戻すか、保持データを元に再描画する設計にします。
-  alert('リセットするには一度「撮り直し」を行ってください。');
-});
-
-// 編集画面から選択肢に戻る
 document.getElementById('btn-back-choice').addEventListener('click', () => {
   editTools.classList.add('hidden');
   choiceTools.classList.remove('hidden');
 });
 
-// 自動保存用関数
 function autoSaveImage(suffix) {
   const link = document.createElement('a');
   link.download = `cheki_${getFormattedDate().replace(/\./g, '')}_${currentUniqueCode}_${suffix}.png`;
@@ -214,7 +318,6 @@ function autoSaveImage(suffix) {
   link.click();
 }
 
-// 7. 最終保存（デコ完了後）
 document.getElementById('btn-final-save').addEventListener('click', () => {
   autoSaveImage('decorated');
   alert('画像を保存しました！');
