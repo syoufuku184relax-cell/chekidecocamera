@@ -1,163 +1,358 @@
-<!DOCTYPE html>
-<html lang="ja">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <link rel="manifest" href="manifest.json">
-  <title>チェキデコカメラ</title>
-  <style>
-    * { box-sizing: border-box; touch-action: none; margin: 0; padding: 0; }
-    body { background: #0b0b0b; color: #fff; font-family: sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; min-height: 100vh; padding: 10px 0; overflow-x: hidden; }
-    
-    /* 4:5 チェキ風コンテナ（下部余白をコンパクト化） */
-    #container { 
-      position: relative; 
-      width: 92vw; 
-      max-width: 414px; 
-      height: 108vw; 
-      max-height: 486px; 
-      background: #fdfdfd; 
-      padding: 2.5% 2.5% 7.5% 2.5%; 
-      box-shadow: 0 8px 24px rgba(0,0,0,0.6); 
-      border-radius: 6px; 
-      display: flex; 
-      flex-direction: column; 
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js');
+}
+
+const video = document.getElementById('webcam');
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+
+const camTools = document.getElementById('cam-tools');
+const choiceTools = document.getElementById('choice-tools');
+const editTools = document.getElementById('edit-tools');
+const zoomSliderBox = document.getElementById('zoom-slider-box');
+const zoomRange = document.getElementById('zoom-range');
+
+const settingsModal = document.getElementById('settings-modal');
+const inputGroup = document.getElementById('input-group');
+const inputMember = document.getElementById('input-member');
+const inputMemberColor = document.getElementById('input-member-color');
+const lblGroup = document.getElementById('lbl-group');
+const lblMember = document.getElementById('lbl-member');
+
+let currentStream = null;
+let currentFacingMode = 'environment';
+let torchState = false;
+let isDrawing = false;
+let currentMode = 'pen';
+let currentColor = '#ff0000';
+let currentLineWidth = 16;
+let currentUniqueCode = '';
+
+// ローカルストレージから設定復元
+inputGroup.value = localStorage.getItem('cheki_group') || '';
+inputMember.value = localStorage.getItem('cheki_member') || '';
+inputMemberColor.value = localStorage.getItem('cheki_mcolor') || '#ff007f';
+
+function updateHeaderLabels() {
+  lblGroup.textContent = inputGroup.value;
+  lblMember.textContent = inputMember.value;
+  lblMember.style.color = inputMemberColor.value;
+  
+  localStorage.setItem('cheki_group', inputGroup.value);
+  localStorage.setItem('cheki_member', inputMember.value);
+  localStorage.setItem('cheki_mcolor', inputMemberColor.value);
+}
+updateHeaderLabels();
+
+// 設定画面の開閉
+document.getElementById('btn-open-settings').addEventListener('click', () => {
+  settingsModal.classList.remove('hidden');
+});
+document.getElementById('btn-close-settings').addEventListener('click', () => {
+  updateHeaderLabels();
+  settingsModal.classList.add('hidden');
+});
+
+// 4桁の重複なし番号生成
+function generateUniqueCode() {
+  const todayStr = new Date().toISOString().slice(0, 10);
+  let storedData = JSON.parse(localStorage.getItem('cheki_codes') || '{}');
+  if (storedData.date !== todayStr) storedData = { date: todayStr, codes: [] };
+
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let code = '';
+  while (true) {
+    code = '';
+    for (let i = 0; i < 4; i++) code += chars.charAt(Math.floor(Math.random() * chars.length));
+    if (!storedData.codes.includes(code)) {
+      storedData.codes.push(code);
+      localStorage.setItem('cheki_codes', JSON.stringify(storedData));
+      break;
     }
-    
-    .cheki-header {
-      position: absolute;
-      top: 1.5%;
-      left: 2.5%;
-      right: 2.5%;
-      display: flex;
-      justify-content: space-between;
-      font-size: 11px;
-      font-weight: bold;
-      color: #555;
-      pointer-events: none;
-      z-index: 5;
+  }
+  return code;
+}
+
+function getFormattedDate() {
+  const now = new Date();
+  return `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
+}
+
+// カメラ初期化処理の堅牢化
+async function initCamera() {
+  if (currentStream) {
+    currentStream.getTracks().forEach(track => track.stop());
+  }
+
+  // セキュアコンテキスト（HTTPSやlocalhost）のチェック
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert('このブラウザまたは接続環境（HTTPS非対応など）ではカメラ機能がサポートされていません。');
+    return;
+  }
+
+  try {
+    // 1. まず厳密な条件で試す
+    const constraints = {
+      video: { facingMode: { exact: currentFacingMode }, width: { ideal: 1080 }, height: { ideal: 1350 } },
+      audio: false
+    };
+    currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+    video.srcObject = currentStream;
+    zoomRange.value = 1;
+    zoomSliderBox.classList.remove('hidden');
+  } catch (err1) {
+    console.warn('厳密なカメラ取得に失敗、フォールバックを試みます:', err1);
+    try {
+      // 2. 厳密指定を解除したフォールバック
+      const fallbackConstraints = {
+        video: { facingMode: currentFacingMode },
+        audio: false
+      };
+      currentStream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+      video.srcObject = currentStream;
+      zoomRange.value = 1;
+      zoomSliderBox.classList.remove('hidden');
+    } catch (err2) {
+      console.warn('通常フォールバックも失敗、制約なしで再試行:', err2);
+      try {
+        // 3. 完全な制約なし（最低限のカメラ）
+        currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        video.srcObject = currentStream;
+        zoomRange.value = 1;
+        zoomSliderBox.classList.remove('hidden');
+      } catch (err3) {
+        alert('カメラを起動できませんでした。ブラウザのカメラ権限が許可されているか、他のアプリがカメラを使用していないか確認してください。');
+        zoomSliderBox.classList.add('hidden');
+      }
     }
+  }
+}
 
-    .viewport { width: 100%; height: 91%; object-fit: cover; background: #000; border-radius: 2px; }
-    canvas { display: none; cursor: crosshair; }
-    
-    .toolbar { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; justify-content: center; width: 94vw; max-width: 430px; }
-    button, input, select { padding: 8px 12px; font-weight: bold; border-radius: 18px; border: none; background: #ff69b4; color: #fff; font-size: 13px; cursor: pointer; }
-    button:active { opacity: 0.8; }
-    .btn-secondary { background: #6c757d; }
-    .btn-success { background: #28a745; }
-    .btn-warning { background: #ffc107; color: #000; }
-    .btn-active { border: 2px solid #fff; box-shadow: 0 0 8px rgba(255,255,255,0.8); }
-    .hidden { display: none !important; }
+// 読み込み時に実行
+initCamera();
 
-    /* 設定モーダル画面 */
-    #settings-modal {
-      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-      background: rgba(0,0,0,0.85); display: flex; align-items: center; justify-content: center; z-index: 100;
+document.getElementById('btn-flip').addEventListener('click', () => {
+  currentFacingMode = (currentFacingMode === 'environment') ? 'user' : 'environment';
+  initCamera();
+});
+
+document.getElementById('btn-torch').addEventListener('click', async () => {
+  const track = currentStream?.getVideoTracks()[0];
+  if (!track) return;
+  try {
+    torchState = !torchState;
+    await track.applyConstraints({ advanced: [{ torch: torchState }] });
+    document.getElementById('btn-torch').style.background = torchState ? '#28a745' : '#ffc107';
+  } catch (err) {
+    alert('お使いの端末・カメラではライト制御がサポートされていません。');
+    torchState = !torchState;
+  }
+});
+
+zoomRange.addEventListener('input', (e) => {
+  const track = currentStream?.getVideoTracks()[0];
+  if (!track) return;
+  try {
+    const capabilities = track.getCapabilities();
+    if (capabilities.zoom) {
+      track.applyConstraints({ advanced: [{ zoom: parseFloat(e.target.value) }] });
+    } else {
+      video.style.transform = `scale(${e.target.value})`;
     }
-    .modal-content { background: #222; padding: 20px; border-radius: 10px; width: 90vw; max-width: 360px; display: flex; flex-direction: column; gap: 12px; font-size: 13px; }
-    .config-row { display: flex; flex-direction: column; gap: 4px; }
-    .config-row input { background: #333; color: #fff; border: 1px solid #555; padding: 8px; border-radius: 4px; font-size: 14px; }
+  } catch (err) {
+    video.style.transform = `scale(${e.target.value})`;
+  }
+});
 
-    /* カラーパレット (色名付き) */
-    .palette-container { display: flex; gap: 8px; overflow-x: auto; max-width: 92vw; padding: 4px 0; align-items: center; }
-    .color-item { display: flex; flex-direction: column; align-items: center; gap: 2px; cursor: pointer; flex-shrink: 0; }
-    .color-chip { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
-    .color-item.selected .color-chip { transform: scale(1.15); border-color: #ff007f; }
-    .color-label { font-size: 9px; color: #bbb; }
+// 撮影処理
+document.getElementById('btn-snap').addEventListener('click', () => {
+  if (!video.videoWidth) {
+    alert('カメラの映像がまだ準備できていません。少し待ってから再度お試しください。');
+    return;
+  }
 
-    .slider-container { display: flex; align-items: center; gap: 6px; font-size: 11px; width: 92vw; max-width: 414px; margin-top: 4px; }
-    .slider-container input[type="range"] { flex-grow: 1; }
-  </style>
-</head>
-<body>
+  currentUniqueCode = generateUniqueCode();
+  
+  ctx.fillStyle = '#fdfdfd';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  <!-- 設定画面（モーダル） -->
-  <div id="settings-modal" class="hidden">
-    <div class="modal-content">
-      <h3 style="text-align: center; color: #ff69b4;">⚙️ アイドル情報設定</h3>
-      <div class="config-row">
-        <span>グループ名:</span>
-        <input type="text" id="input-group" placeholder="例: 推しメンアイドル">
-      </div>
-      <div class="config-row">
-        <span>メンバー名:</span>
-        <input type="text" id="input-member" placeholder="例: 担当 〇〇">
-      </div>
-      <div class="config-row">
-        <span>メンバーカラー:</span>
-        <input type="color" id="input-member-color" value="#ff007f" style="width: 100%; height: 36px; padding:0; border:none; border-radius:4px; cursor:pointer;">
-      </div>
-      <button id="btn-close-settings" class="btn-success" style="margin-top: 8px;">設定を保存して閉じる</button>
-    </div>
-  </div>
+  const vWidth = video.videoWidth;
+  const vHeight = video.videoHeight;
+  const targetW = 1080;
+  const targetH = 1200;
+  
+  const scale = Math.max(targetW / vWidth, targetH / vHeight);
+  const sw = targetW / scale;
+  const sh = targetH / scale;
+  const sx = (vWidth - sw) / 2;
+  const sy = (vHeight - sh) / 2;
 
-  <div id="container">
-    <div class="cheki-header" id="cheki-header-view">
-      <span id="lbl-group"></span>
-      <span id="lbl-member"></span>
-    </div>
-    <video id="webcam" class="viewport" autoplay playsinline></video>
-    <canvas id="stage" class="viewport" width="1080" height="1350"></canvas>
-  </div>
+  ctx.drawImage(video, sx, sy, sw, sh, 0, 0, targetW, targetH);
 
-  <!-- ズームスライダー -->
-  <div class="slider-container hidden" id="zoom-slider-box">
-    <span>🔍 ズーム</span>
-    <input type="range" id="zoom-range" min="1" max="5" step="0.1" value="1">
-  </div>
+  // 上部テキスト
+  ctx.fillStyle = '#555555';
+  ctx.font = 'bold 34px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(inputGroup.value, 60, 65);
+  
+  ctx.fillStyle = inputMemberColor.value;
+  ctx.textAlign = 'right';
+  ctx.fillText(inputMember.value, 1020, 65);
 
-  <!-- カメラ撮影ツールバー -->
-  <div class="toolbar" id="cam-tools">
-    <button id="btn-open-settings" class="btn-secondary">⚙️ 設定</button>
-    <button id="btn-flip" class="btn-secondary">🔄 切替</button>
-    <button id="btn-torch" class="btn-warning">🔦 ライト</button>
-    <button id="btn-snap" style="flex-grow: 1;">📷 撮影する</button>
-  </div>
+  // 下部テキスト
+  ctx.fillStyle = '#444444';
+  ctx.font = 'bold 36px sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillText(getFormattedDate(), 60, 1315);
 
-  <!-- 撮影後の選択肢ツールバー -->
-  <div class="toolbar hidden" id="choice-tools">
-    <button id="btn-retake" class="btn-secondary">撮り直し</button>
-    <button id="btn-save-and-draw" class="btn-success">保存して描画へ</button>
-    <button id="btn-skip-save-draw">保存しないで描画へ</button>
-  </div>
+  ctx.textAlign = 'right';
+  ctx.fillText(`#${currentUniqueCode}`, 1020, 1315);
 
-  <!-- デコレーションツールバー -->
-  <div class="toolbar hidden" id="edit-tools">
-    <!-- カラーパレット（色名付き） -->
-    <div class="palette-container" id="color-palette">
-      <div class="color-item selected" data-color="#ff0000"><div class="color-chip" style="background: #ff0000;"></div><span class="color-label">赤</span></div>
-      <div class="color-item" data-color="#0000ff"><div class="color-chip" style="background: #0000ff;"></div><span class="color-label">青</span></div>
-      <div class="color-item" data-color="#FFFF00"><div class="color-chip" style="background: #FFFF00;"></div><span class="color-label">黄</span></div>
-      <div class="color-item" data-color="#ff00ff"><div class="color-chip" style="background: #ff00ff;"></div><span class="color-label">紫</span></div>
-      <div class="color-item" data-color="#008000"><div class="color-chip" style="background: #008000;"></div><span class="color-label">緑</span></div>
-      <div class="color-item" data-color="#ff69b4"><div class="color-chip" style="background: #ff69b4;"></div><span class="color-label">ピンク</span></div>
-      <div class="color-item" data-color="#00a86b"><div class="color-chip" style="background: #00a86b;"></div><span class="color-label">エメラルド</span></div>
-      <div class="color-item" data-color="#87ceeb"><div class="color-chip" style="background: #87ceeb;"></div><span class="color-label">パステル</span></div>
-      <div class="color-item" data-color="#ffa500"><div class="color-chip" style="background: #ffa500;"></div><span class="color-label">オレンジ</span></div>
-      <div class="color-item" data-color="#ffffff"><div class="color-chip" style="background: #ffffff; border: 2px solid #ccc;"></div><span class="color-label">白</span></div>
-      <div class="color-item" data-color="#000000"><div class="color-chip" style="background: #000000;"></div><span class="color-label">黒</span></div>
-      
-      <div class="color-item" style="position:relative;">
-        <input type="color" id="pen-custom-color" value="#ff007f" title="カスタムカラー" style="width:26px; height:26px; padding:0; border:none; border-radius:50%; cursor:pointer; opacity:0; position:absolute; top:0; left:0;">
-        <div class="color-chip" style="background: conic-gradient(red, yellow, green, cyan, blue, magenta, red);"></div>
-        <span class="color-label">カスタム</span>
-      </div>
-      <button id="btn-eraser" class="btn-secondary" style="padding: 4px 8px; font-size: 11px; margin-left: 4px;">🧹 消しゴム</button>
-    </div>
-    
-    <!-- 太さ選択 & スタンプ & アクション -->
-    <div style="display: flex; gap: 4px; width: 100%; justify-content: center; align-items: center; margin-top: 4px; flex-wrap: wrap;">
-      <button id="size-thin" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;">細</button>
-      <button id="size-mid" class="btn-active" style="padding: 4px 8px; font-size: 11px;">中</button>
-      <button id="size-thick" class="btn-secondary" style="padding: 4px 8px; font-size: 11px;">太</button>
-      <button id="btn-stamp-heart">❤️</button>
-      <button id="btn-stamp-star">⭐</button>
-      <button id="btn-back-choice" class="btn-secondary">戻る</button>
-      <button id="btn-final-save" class="btn-success">💾 保存</button>
-    </div>
-  </div>
+  video.classList.add('hidden');
+  zoomSliderBox.classList.add('hidden');
+  canvas.style.display = 'block';
+  camTools.classList.add('hidden');
+  choiceTools.classList.remove('hidden');
+});
 
-  <script src="app.js"></script>
-</body>
-</html>
+document.getElementById('btn-retake').addEventListener('click', () => {
+  video.classList.remove('hidden');
+  zoomSliderBox.classList.remove('hidden');
+  canvas.style.display = 'none';
+  choiceTools.classList.add('hidden');
+  camTools.classList.remove('hidden');
+});
+
+document.getElementById('btn-save-and-draw').addEventListener('click', () => {
+  autoSaveImage('raw');
+  goToEditMode();
+});
+
+document.getElementById('btn-skip-save-draw').addEventListener('click', () => {
+  goToEditMode();
+});
+
+function goToEditMode() {
+  choiceTools.classList.add('hidden');
+  editTools.classList.remove('hidden');
+}
+
+// カラーパレット選択
+const colorItems = document.querySelectorAll('.color-item');
+colorItems.forEach(item => {
+  item.addEventListener('click', (e) => {
+    const color = item.getAttribute('data-color');
+    if (!color) return;
+    colorItems.forEach(i => i.classList.remove('selected'));
+    item.classList.add('selected');
+    currentColor = color;
+    currentMode = 'pen';
+    document.getElementById('btn-eraser').classList.remove('btn-active');
+  });
+});
+
+document.getElementById('pen-custom-color').addEventListener('input', (e) => {
+  colorItems.forEach(i => i.classList.remove('selected'));
+  currentColor = e.target.value;
+  currentMode = 'pen';
+  document.getElementById('btn-eraser').classList.remove('btn-active');
+});
+
+document.getElementById('btn-eraser').addEventListener('click', () => {
+  currentMode = 'eraser';
+  colorItems.forEach(i => i.classList.remove('selected'));
+  document.getElementById('btn-eraser').classList.add('btn-active');
+});
+
+// 太さボタン
+const sizeThin = document.getElementById('size-thin');
+const sizeMid = document.getElementById('size-mid');
+const sizeThick = document.getElementById('size-thick');
+
+function updateSizeButtons(selectedBtn, width) {
+  [sizeThin, sizeMid, sizeThick].forEach(btn => {
+    btn.classList.remove('btn-active');
+    btn.classList.add('btn-secondary');
+  });
+  selectedBtn.classList.remove('btn-secondary');
+  selectedBtn.classList.add('btn-active');
+  currentLineWidth = width;
+}
+
+sizeThin.addEventListener('click', () => updateSizeButtons(sizeThin, 8));
+sizeMid.addEventListener('click', () => updateSizeButtons(sizeMid, 16));
+sizeThick.addEventListener('click', () => updateSizeButtons(sizeThick, 32));
+
+// 描画ロジック
+function getCanvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  const touch = e.touches ? e.touches[0] : e;
+  return {
+    x: (touch.clientX - rect.left) * (canvas.width / rect.width),
+    y: (touch.clientY - rect.top) * (canvas.height / rect.height)
+  };
+}
+
+function startDraw(e) {
+  if (editTools.classList.contains('hidden')) return;
+  const { x, y } = getCanvasCoords(e);
+  
+  if (currentMode === 'pen' || currentMode === 'eraser') {
+    isDrawing = true;
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = currentLineWidth;
+    ctx.strokeStyle = (currentMode === 'eraser') ? '#fdfdfd' : currentColor;
+  } else if (currentMode === 'heart') {
+    drawEmoji('❤️', x, y);
+  } else if (currentMode === 'star') {
+    drawEmoji('⭐', x, y);
+  }
+}
+
+function moveDraw(e) {
+  if (!isDrawing || (currentMode !== 'pen' && currentMode !== 'eraser')) return;
+  const { x, y } = getCanvasCoords(e);
+  ctx.lineTo(x, y);
+  ctx.stroke();
+}
+
+function endDraw() {
+  isDrawing = false;
+}
+
+function drawEmoji(emoji, x, y) {
+  ctx.font = '100px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(emoji, x, y);
+}
+
+canvas.addEventListener('mousedown', startDraw);
+canvas.addEventListener('mousemove', moveDraw);
+canvas.addEventListener('mouseup', endDraw);
+canvas.addEventListener('touchstart', (e) => { e.preventDefault(); startDraw(e); }, { passive: false });
+canvas.addEventListener('touchmove', (e) => { e.preventDefault(); moveDraw(e); }, { passive: false });
+canvas.addEventListener('touchend', endDraw);
+
+document.getElementById('btn-stamp-heart').addEventListener('click', () => currentMode = 'heart');
+document.getElementById('btn-stamp-star').addEventListener('click', () => currentMode = 'star');
+
+document.getElementById('btn-back-choice').addEventListener('click', () => {
+  editTools.classList.add('hidden');
+  choiceTools.classList.remove('hidden');
+});
+
+function autoSaveImage(suffix) {
+  const link = document.createElement('a');
+  link.download = `cheki_${getFormattedDate().replace(/\./g, '')}_${currentUniqueCode}_${suffix}.png`;
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+}
+
+document.getElementById('btn-final-save').addEventListener('click', () => {
+  autoSaveImage('decorated');
+  alert('画像を保存しました！');
+});
