@@ -14,10 +14,12 @@ const zoomRange = document.getElementById('zoom-range');
 
 const settingsModal = document.getElementById('settings-modal');
 const inputGroup = document.getElementById('input-group');
-const inputMember = document.getElementById('input-member');
-const inputMemberColor = document.getElementById('input-member-color');
+const memberListContainer = document.getElementById('member-list-container');
 const lblGroup = document.getElementById('lbl-group');
 const lblMember = document.getElementById('lbl-member');
+
+const popupModal = document.getElementById('popup-modal');
+const popupMemberList = document.getElementById('popup-member-list');
 
 let currentStream = null;
 let currentFacingMode = 'environment';
@@ -28,29 +30,180 @@ let currentColor = '#ff0000';
 let currentLineWidth = 16;
 let currentUniqueCode = '';
 
-// ローカルストレージから設定復元
+// メンバー情報のロード（デフォルトで1つ用意）
+let members = JSON.parse(localStorage.getItem('cheki_members') || JSON.stringify([
+  { name: '担当 〇〇', color: '#ff007f' }
+]));
+let currentMemberIndex = parseInt(localStorage.getItem('cheki_curr_idx') || '0', 10);
+if (currentMemberIndex >= members.length) currentMemberIndex = 0;
+
 inputGroup.value = localStorage.getItem('cheki_group') || '';
-inputMember.value = localStorage.getItem('cheki_member') || '';
-inputMemberColor.value = localStorage.getItem('cheki_mcolor') || '#ff007f';
+
+// カラーパレットの定義（設定画面・描画画面共通）
+const paletteData = [
+  { color: '#ff0000', label: '赤' },
+  { color: '#0000ff', label: '青' },
+  { color: '#FFFF00', label: '黄' },
+  { color: '#ff00ff', label: '紫' },
+  { color: '#008000', label: '緑' },
+  { color: '#ff69b4', label: 'ピンク' },
+  { color: '#00a86b', label: 'エメラルド' },
+  { color: '#87ceeb', label: 'パステル' },
+  { color: '#ffa500', label: 'オレンジ' },
+  { color: '#ffffff', label: '白' },
+  { color: '#000000', label: '黒' }
+];
+
+// 共通パレットをHTMLに生成する関数
+function renderPalettes() {
+  const containers = [
+    document.getElementById('color-palette'),
+    document.getElementById('settings-color-palette')
+  ];
+
+  containers.forEach(container => {
+    if (!container) return;
+    container.innerHTML = '';
+
+    paletteData.forEach(item => {
+      const div = document.createElement('div');
+      div.className = `color-item ${currentColor === item.color ? 'selected' : ''}`;
+      div.setAttribute('data-color', item.color);
+      
+      const borderStyle = (item.color === '#ffffff' || item.color === '#000000') ? 'border: 2px solid #888;' : 'border: 2px solid #fff;';
+      div.innerHTML = `
+        <div class="color-chip" style="background: ${item.color}; ${borderStyle}"></div>
+        <span class="color-label">${item.label}</span>
+      `;
+      div.addEventListener('click', () => {
+        currentColor = item.color;
+        currentMode = 'pen';
+        const eraserBtn = document.getElementById('btn-eraser');
+        if (eraserBtn) eraserBtn.classList.remove('btn-active');
+        renderPalettes();
+      });
+      container.appendChild(div);
+    });
+
+    // カスタムカラーパレット項目
+    const customDiv = document.createElement('div');
+    customDiv.className = 'color-item';
+    customDiv.style.position = 'relative';
+    customDiv.innerHTML = `
+      <input type="color" id="pen-custom-color-${container.id}" value="${currentColor}" title="カスタム" style="width:26px; height:26px; padding:0; border:none; border-radius:50%; cursor:pointer; opacity:0; position:absolute; top:0; left:0;">
+      <div class="color-chip" style="background: conic-gradient(red, yellow, green, cyan, blue, magenta, red); border: 2px solid #fff;"></div>
+      <span class="color-label">カスタム</span>
+    `;
+    const inputEl = customDiv.querySelector('input');
+    inputEl.addEventListener('input', (e) => {
+      currentColor = e.target.value;
+      currentMode = 'pen';
+      renderPalettes();
+    });
+    container.appendChild(customDiv);
+
+    // 消しゴムボタン（描画ツールバー側のみ）
+    if (container.id === 'color-palette') {
+      const eraserBtn = document.createElement('button');
+      eraserBtn.id = 'btn-eraser';
+      eraserBtn.className = `btn-secondary ${currentMode === 'eraser' ? 'btn-active' : ''}`;
+      eraserBtn.style.cssText = 'padding: 4px 8px; font-size: 11px; margin-left: 4px;';
+      eraserBtn.textContent = '🧹 消しゴム';
+      eraserBtn.addEventListener('click', () => {
+        currentMode = 'eraser';
+        renderPalettes();
+      });
+      container.appendChild(eraserBtn);
+    }
+  });
+}
+
+// 設定画面のメンバー入力行を構築
+function renderMemberInputs() {
+  memberListContainer.innerHTML = '';
+  members.forEach((m, idx) => {
+    const row = document.createElement('div');
+    row.className = 'member-entry-box';
+    row.innerHTML = `
+      <div style="display: flex; gap: 6px; align-items: center;">
+        <input type="text" class="m-name" value="${m.name}" placeholder="メンバー名" style="flex-grow:1;">
+        <input type="color" class="m-color" value="${m.color}" style="width: 36px; height: 34px; padding:0; border:none; border-radius:4px; cursor:pointer;">
+        <button class="btn-secondary btn-del-member" style="padding: 4px 8px; background: #d9534f;">✕</button>
+      </div>
+    `;
+    row.querySelector('.btn-del-member').addEventListener('click', () => {
+      if (members.length <= 1) {
+        alert('最低1人のメンバーが必要です。');
+        return;
+      }
+      members.splice(idx, 1);
+      renderMemberInputs();
+    });
+    memberListContainer.appendChild(row);
+  });
+}
+
+document.getElementById('btn-add-member-row').addEventListener('click', () => {
+  members.push({ name: '新メンバー', color: '#ff69b4' });
+  renderMemberInputs();
+});
 
 function updateHeaderLabels() {
   lblGroup.textContent = inputGroup.value;
-  lblMember.textContent = inputMember.value;
-  lblMember.style.color = inputMemberColor.value;
+  const currentMember = members[currentMemberIndex] || members[0];
+  lblMember.textContent = currentMember.name;
+  lblMember.style.color = currentMember.color;
   
   localStorage.setItem('cheki_group', inputGroup.value);
-  localStorage.setItem('cheki_member', inputMember.value);
-  localStorage.setItem('cheki_mcolor', inputMemberColor.value);
+  localStorage.setItem('cheki_members', JSON.stringify(members));
+  localStorage.setItem('cheki_curr_idx', currentMemberIndex);
 }
 updateHeaderLabels();
+renderPalettes();
 
 // 設定画面の開閉
 document.getElementById('btn-open-settings').addEventListener('click', () => {
+  renderMemberInputs();
   settingsModal.classList.remove('hidden');
 });
+
 document.getElementById('btn-close-settings').addEventListener('click', () => {
+  // 入力欄からデータを反映
+  const rows = memberListContainer.querySelectorAll('.member-entry-box');
+  members = [];
+  rows.forEach(row => {
+    const name = row.querySelector('.m-name').value.trim() || '未設定';
+    const color = row.querySelector('.m-color').value;
+    members.push({ name, color });
+  });
+  if (currentMemberIndex >= members.length) currentMemberIndex = 0;
+
   updateHeaderLabels();
   settingsModal.classList.add('hidden');
+});
+
+// アイドル名クリックでメンバー切替ポップアップを表示
+lblMember.addEventListener('click', () => {
+  popupMemberList.innerHTML = '';
+  members.forEach((m, idx) => {
+    const item = document.createElement('div');
+    item.className = 'popup-item';
+    item.style.color = m.color;
+    item.textContent = m.name;
+    if (idx === currentMemberIndex) item.style.border = '2px solid #ff69b4';
+    
+    item.addEventListener('click', () => {
+      currentMemberIndex = idx;
+      updateHeaderLabels();
+      popupModal.classList.add('hidden');
+    });
+    popupMemberList.appendChild(item);
+  });
+  popupModal.classList.remove('hidden');
+});
+
+document.getElementById('btn-close-popup').addEventListener('click', () => {
+  popupModal.classList.add('hidden');
 });
 
 // 4桁の重複なし番号生成
@@ -78,20 +231,16 @@ function getFormattedDate() {
   return `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
 }
 
-// カメラ初期化処理の堅牢化
+// カメラ初期化
 async function initCamera() {
   if (currentStream) {
     currentStream.getTracks().forEach(track => track.stop());
   }
-
-  // セキュアコンテキスト（HTTPSやlocalhost）のチェック
   if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    alert('このブラウザまたは接続環境（HTTPS非対応など）ではカメラ機能がサポートされていません。');
+    alert('このブラウザではカメラ機能がサポートされていません。');
     return;
   }
-
   try {
-    // 1. まず厳密な条件で試す
     const constraints = {
       video: { facingMode: { exact: currentFacingMode }, width: { ideal: 1080 }, height: { ideal: 1350 } },
       audio: false
@@ -101,34 +250,25 @@ async function initCamera() {
     zoomRange.value = 1;
     zoomSliderBox.classList.remove('hidden');
   } catch (err1) {
-    console.warn('厳密なカメラ取得に失敗、フォールバックを試みます:', err1);
     try {
-      // 2. 厳密指定を解除したフォールバック
-      const fallbackConstraints = {
-        video: { facingMode: currentFacingMode },
-        audio: false
-      };
+      const fallbackConstraints = { video: { facingMode: currentFacingMode }, audio: false };
       currentStream = await navigator.mediaDevices.getUserMedia(fallbackConstraints);
       video.srcObject = currentStream;
       zoomRange.value = 1;
       zoomSliderBox.classList.remove('hidden');
     } catch (err2) {
-      console.warn('通常フォールバックも失敗、制約なしで再試行:', err2);
       try {
-        // 3. 完全な制約なし（最低限のカメラ）
         currentStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
         video.srcObject = currentStream;
         zoomRange.value = 1;
         zoomSliderBox.classList.remove('hidden');
       } catch (err3) {
-        alert('カメラを起動できませんでした。ブラウザのカメラ権限が許可されているか、他のアプリがカメラを使用していないか確認してください。');
+        alert('カメラを起動できませんでした。');
         zoomSliderBox.classList.add('hidden');
       }
     }
   }
 }
-
-// 読み込み時に実行
 initCamera();
 
 document.getElementById('btn-flip').addEventListener('click', () => {
@@ -167,7 +307,7 @@ zoomRange.addEventListener('input', (e) => {
 // 撮影処理
 document.getElementById('btn-snap').addEventListener('click', () => {
   if (!video.videoWidth) {
-    alert('カメラの映像がまだ準備できていません。少し待ってから再度お試しください。');
+    alert('カメラの映像がまだ準備できていません。');
     return;
   }
 
@@ -189,15 +329,17 @@ document.getElementById('btn-snap').addEventListener('click', () => {
 
   ctx.drawImage(video, sx, sy, sw, sh, 0, 0, targetW, targetH);
 
+  const currentMember = members[currentMemberIndex] || members[0];
+
   // 上部テキスト
   ctx.fillStyle = '#555555';
   ctx.font = 'bold 34px sans-serif';
   ctx.textAlign = 'left';
   ctx.fillText(inputGroup.value, 60, 65);
   
-  ctx.fillStyle = inputMemberColor.value;
+  ctx.fillStyle = currentMember.color;
   ctx.textAlign = 'right';
-  ctx.fillText(inputMember.value, 1020, 65);
+  ctx.fillText(currentMember.name, 1020, 65);
 
   // 下部テキスト
   ctx.fillStyle = '#444444';
@@ -236,33 +378,6 @@ function goToEditMode() {
   choiceTools.classList.add('hidden');
   editTools.classList.remove('hidden');
 }
-
-// カラーパレット選択
-const colorItems = document.querySelectorAll('.color-item');
-colorItems.forEach(item => {
-  item.addEventListener('click', (e) => {
-    const color = item.getAttribute('data-color');
-    if (!color) return;
-    colorItems.forEach(i => i.classList.remove('selected'));
-    item.classList.add('selected');
-    currentColor = color;
-    currentMode = 'pen';
-    document.getElementById('btn-eraser').classList.remove('btn-active');
-  });
-});
-
-document.getElementById('pen-custom-color').addEventListener('input', (e) => {
-  colorItems.forEach(i => i.classList.remove('selected'));
-  currentColor = e.target.value;
-  currentMode = 'pen';
-  document.getElementById('btn-eraser').classList.remove('btn-active');
-});
-
-document.getElementById('btn-eraser').addEventListener('click', () => {
-  currentMode = 'eraser';
-  colorItems.forEach(i => i.classList.remove('selected'));
-  document.getElementById('btn-eraser').classList.add('btn-active');
-});
 
 // 太さボタン
 const sizeThin = document.getElementById('size-thin');
